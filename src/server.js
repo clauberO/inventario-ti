@@ -1,0 +1,14 @@
+require('dotenv').config();
+const path=require('path'); const Fastify=require('fastify'); const bcrypt=require('bcryptjs'); const pool=require('./database');
+const app=Fastify({logger:true});
+app.register(require('@fastify/cors'),{origin:true});
+app.register(require('@fastify/jwt'),{secret:process.env.JWT_SECRET||'CHANGE_ME'});
+app.register(require('@fastify/static'),{root:path.join(__dirname,'../public'),prefix:'/'});
+const auth=async(req,reply)=>{try{await req.jwtVerify()}catch(e){return reply.code(401).send({error:'Não autorizado'})}};
+app.post('/api/login',async(req,reply)=>{const {username,password}=req.body||{}; const r=await pool.query('SELECT * FROM users WHERE username=$1',[username]); if(!r.rowCount||!(await bcrypt.compare(password,r.rows[0].password_hash))) return reply.code(401).send({error:'Usuário ou senha inválidos'}); return {token:app.jwt.sign({id:r.rows[0].id,username,role:r.rows[0].role},{expiresIn:'8h'}),user:{username,role:r.rows[0].role}}});
+app.get('/api/assets',{preHandler:auth},async()=>{const r=await pool.query('SELECT * FROM assets ORDER BY id DESC');return r.rows});
+app.post('/api/assets',{preHandler:auth},async(req,reply)=>{const a=req.body; try{const r=await pool.query(`INSERT INTO assets(patrimonio,numero_serie,tipo,fabricante,modelo,localizacao,responsavel,status,observacoes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,[a.patrimonio,a.numero_serie,a.tipo,a.fabricante||null,a.modelo||null,a.localizacao||null,a.responsavel||null,a.status||'Em estoque',a.observacoes||null]);return reply.code(201).send(r.rows[0])}catch(e){if(e.code==='23505')return reply.code(409).send({error:'Patrimônio ou número de série já cadastrado'});throw e}});
+app.put('/api/assets/:id',{preHandler:auth},async(req,reply)=>{const a=req.body;try{const r=await pool.query(`UPDATE assets SET patrimonio=$1,numero_serie=$2,tipo=$3,fabricante=$4,modelo=$5,localizacao=$6,responsavel=$7,status=$8,observacoes=$9,updated_at=NOW() WHERE id=$10 RETURNING *`,[a.patrimonio,a.numero_serie,a.tipo,a.fabricante||null,a.modelo||null,a.localizacao||null,a.responsavel||null,a.status,a.observacoes||null,req.params.id]); if(!r.rowCount)return reply.code(404).send({error:'Ativo não encontrado'});return r.rows[0]}catch(e){if(e.code==='23505')return reply.code(409).send({error:'Patrimônio ou número de série já cadastrado'});throw e}});
+app.delete('/api/assets/:id',{preHandler:auth},async(req,reply)=>{await pool.query('DELETE FROM assets WHERE id=$1',[req.params.id]);return reply.code(204).send()});
+app.get('/',async(req,reply)=>reply.sendFile('login.html'));
+app.listen({port:Number(process.env.PORT||3000),host:process.env.HOST||'0.0.0.0'}).catch(e=>{app.log.error(e);process.exit(1)});
