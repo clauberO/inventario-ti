@@ -1,0 +1,3 @@
+require('dotenv').config();
+const fs=require('fs'); const path=require('path'); const bcrypt=require('bcryptjs'); const pool=require('./database');
+(async()=>{try{await pool.query(fs.readFileSync(path.join(__dirname,'../database/schema.sql'),'utf8')); const u=process.env.ADMIN_USER||'admin'; const p=process.env.ADMIN_PASSWORD; if(!p) throw new Error('Defina ADMIN_PASSWORD no .env'); const h=await bcrypt.hash(p,12); await pool.query('INSERT INTO users(username,password_hash,role) VALUES($1,$2,$3) ON CONFLICT(username) DO UPDATE SET password_hash=EXCLUDED.password_hash',[u,h,'admin']); console.log('Banco inicializado e administrador criado/atualizado.');}catch(e){console.error(e);process.exitCode=1}finally{await pool.end()}})();
